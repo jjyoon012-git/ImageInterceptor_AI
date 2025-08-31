@@ -1,0 +1,7 @@
+ultralytics==8.3.185
+opencv-python
+pyyaml
+numpy
+tqdm
+albumentations
+scikit-learn
