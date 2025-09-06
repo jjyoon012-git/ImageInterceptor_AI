@@ -1,7 +1,6 @@
 """
-dataset_collector_youtube.py
+youtube ver.
 키워드 기반 YouTube CC 동영상 썸네일 수집 (harmful / safe_hard / safe_easy)
-비율: harmful : safe_hard : safe_easy = 1 : 2 : 0.5
 """
 
 import os
@@ -165,3 +164,4 @@ if __name__ == "__main__":
     for cat, kws in KEYWORDS.items():
         fetch_one_category(cat, kws, TARGET_COUNTS[cat])
     print("✅ 전체 수집 완료")
+
