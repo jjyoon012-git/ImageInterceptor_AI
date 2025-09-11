@@ -2,11 +2,6 @@
 <img src="./assets/team_logo.png" alt="Image Interceptor Logo" width="300"/>
 </p>
 
-<p align="center">
-<a href="https://github.com/YourOrg/ImageInterceptor/stargazers"><img src="https://img.shields.io/github/stars/YourOrg/ImageInterceptor?style=for-the-badge" alt="GitHub stars"/></a>
-<a href="https://github.com/YourOrg/ImageInterceptor/issues"><img src="https://img.shields.io/github/issues/YourOrg/ImageInterceptor?style=for-the-badge" alt="GitHub issues"/></a>
-<a href="https://github.com/YourOrg/ImageInterceptor"><img src="https://img.shields.io/github/license/YourOrg/ImageInterceptor?style=for-the-badge" alt="GitHub license"/></a>
-</p>
 
 # Image Interceptor — AI
 
