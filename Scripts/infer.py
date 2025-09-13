@@ -1,4 +1,5 @@
-# 2025-09-13 재업로드
+# 2025-09-13 수정. 카테고리 값이 서버에는 있는데, 현재 모델은 예측하지 않기 때문에 더미값으로 반환하게 수정하였습니다.
+
 import argparse, json
 from pathlib import Path
 from typing import Dict, Any, Iterable
@@ -12,20 +13,17 @@ from PIL import Image, ImageFile, UnidentifiedImageError
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 Image.MAX_IMAGE_PIXELS = None
 
-# 사용자 맞춤 필터링
-# 1(약)
-# 2(중)
-# 3(강)
+# 사용자 맞춤 필터링 (1=약, 2=중, 3=강)
 FILTER_LEVEL_THRESHOLDS = {
-    1: 0.40,  
-    2: 0.50,  
-    3: 0.65, # 임계치 첫 번째 버전. 확인 후 수정 필요
+    1: 0.40,
+    2: 0.50,
+    3: 0.65,  # 임계치 첫 번째 버전. 확인 후 수정 필요
 }
 
 TF = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
-    transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225]),
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 ])
 
 def load_model(ckpt_path: str, device: str) -> nn.Module:
@@ -47,17 +45,36 @@ def _load_image_safe(path: Path) -> Image.Image:
     return Image.open(path).convert("RGB")
 
 @torch.no_grad()
-def infer_one(model: nn.Module, path: Path, device: str, threshold: float) -> Dict[str, Any]:
+def infer_one(
+    model: nn.Module,
+    path: Path,
+    device: str,
+    threshold: float,
+    category_default: str
+) -> Dict[str, Any]:
+    """서버 스펙에 맞춘 한 장 추론 결과 생성"""
+    item = {
+        "url": str(path),          # 서버는 url을 기대하지만, 로컬 경로 문자열도 OK
+        "status": True,            # 처리 성공/실패
+        "harmful": False,          # 결과
+        "category": category_default,  # 더미 카테고리
+        "score": 0.0,              # 확률 P(y=1 harmful)
+    }
     try:
         img = _load_image_safe(path)
         x = TF(img).unsqueeze(0).to(device, non_blocking=True)
+        # PyTorch 2.x 권장 문법
         with torch.amp.autocast("cuda", enabled=(device == "cuda")):
-            logits = model(x)                 # [1,2]
-            prob1 = torch.softmax(logits, dim=1)[0,1].item()  # P(y=1 harmful)
-        label = "harmful" if prob1 >= threshold else "safe"
-        return {"path": str(path), "label": label, "p_harmful": float(prob1), "threshold": float(threshold)}
+            logits = model(x)                                  # [1,2]
+            prob1 = torch.softmax(logits, dim=1)[0, 1].item()  # P(y=1 harmful)
+        item["score"] = float(prob1)
+        item["harmful"] = bool(prob1 >= threshold)
+        return item
     except (UnidentifiedImageError, OSError, ValueError) as e:
-        return {"path": str(path), "error": f"{type(e).__name__}: {e}"}
+        item["status"] = False
+        item["error"] = f"{type(e).__name__}: {e}"
+        # error 시에도 스키마 유지 (harmful=False, score=0.0, category=default)
+        return item
 
 def _iter_images(folder: Path, recursive: bool, exts: Iterable[str]):
     globber = folder.rglob if recursive else folder.glob
@@ -83,8 +100,10 @@ def main():
     ap.add_argument("--ckpt", default=r"C:\Users\jjeong\Desktop\ImageInterceptor\checkpoints\best.pt")
     ap.add_argument("--out",  default=r"C:\Users\jjeong\Desktop\ImageInterceptor\runs\infer_results.json")
     # 필터 강도 및 임계치 직접 지정할 수도 있음
-    ap.add_argument("--level", type=int, choices=[1,2,3], help="필터 강도(1=약, 2=중, 3=강)")
+    ap.add_argument("--level", type=int, choices=[1, 2, 3], help="필터 강도(1=약, 2=중, 3=강)")
     ap.add_argument("--threshold", type=float, help="임계값을 직접 지정 (레벨보다 우선)")
+    # 더미 카테고리 기본값
+    ap.add_argument("--category-default", default="unknown", help="더미 category 값 (기본: unknown)")
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -93,23 +112,27 @@ def main():
     # threshold
     threshold = resolve_threshold(args.level, args.threshold)
 
-    exts = {e.strip().lower() if e.strip().startswith(".") else "."+e.strip().lower()
-            for e in args.exts.split(",") if e.strip()}
+    exts = {
+        e.strip().lower() if e.strip().startswith(".") else "." + e.strip().lower()
+        for e in args.exts.split(",") if e.strip()
+    }
 
     results = []
     if args.image:
-        results.append(infer_one(model, Path(args.image), device, threshold))
+        results.append(infer_one(model, Path(args.image), device, threshold, args.category_default))
     elif args.folder:
         for p in _iter_images(Path(args.folder), args.recursive, exts):
-            results.append(infer_one(model, p, device, threshold))
+            results.append(infer_one(model, p, device, threshold, args.category_default))
     else:
         raise SystemExit(" --image 또는 --folder 중 하나는 지정해야 합니다.")
 
+    # 서버 스펙에 맞게 래핑해서 저장
+    payload = {"image": results}
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
-    print(f"[DONE] 저장: {args.out}  (총 {len(results)}개, level={args.level or 2}, threshold={threshold:.2f})")
+    print(f"[DONE] 저장: {args.out}  (총 {len(results)}개, level={args.level or 2}, threshold={threshold:.2f}, category_default='{args.category_default}')")
     for r in results[:5]:
         print(r)
 
